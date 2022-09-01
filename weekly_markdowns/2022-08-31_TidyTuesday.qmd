@@ -1,0 +1,237 @@
+---
+title: "2022-08-31_TidyTuesday"
+author: "Douglas Lawton"
+format: html
+editor: visual
+editor_options: 
+  chunk_output_type: inline
+---
+
+## TidyTuesday: August 31, 2022
+### Pell grant data
+
+#### Load in libraries
+
+```{r}
+library(tidyverse)
+library(tidymodels)
+library(patchwork)
+library(knitr)
+library(kableExtra)
+```
+
+
+Lets download in the data and make sure it all looks correct
+
+```{r}
+pell <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2022/2022-08-30/pell.csv')
+
+```
+
+```{r}
+pell %>% head()
+```
+
+I've copied and pasted the column names here for ease of use:
+
+| variable  | class   | description                              |
+|-----------|---------|------------------------------------------|
+| STATE     | integer | State shotcode                           |
+| AWARD     | double  | Award amount in USD                      |
+| RECIPIENT | double  | Total number of recipients by year, name |
+| NAME      | integer | Name of college/university               |
+| SESSION   | integer | Session group                            |
+| YEAR      | integer | Year                                     |
+
+How many years of data do we have for each state? Looks like it starts in 1999
+
+```{r}
+
+pell %>% 
+  select(!c(NAME,AWARD,RECIPIENT)) %>%
+  distinct() %>%
+  group_by(STATE) %>%
+  tally() %>% filter(n<19)
+
+```
+
+So it looks like we have complete data for all states! 19 years of data spanning 1999 to 2018.
+
+So this is still a lot of data, I think im interested in comparing the many public universities of North Carolina.There are 16 of them. Sadly, the data is a bit of a mess with many naming errors. Here is some quite ugly code that amends everything.
+
+
+```{r}
+nc_pub_universities <- c("Appalachian State University","North Carolina Agricultural and Technical State University","North Carolina School of the Arts",
+                         "North Carolina Central University","North Carolina State University","Winston-Salem State University",
+                         "North Carolina Agricultural and   Technical State Unive","North Carolina State Univ-Raleigh",
+                         "North Carolina A&t State Univ", "East Carolina University","Elizabeth City State University","Fayetteville State University","Western Carolina University")
+
+
+pell_filtered <- pell %>% 
+  filter(STATE == "NC" &
+         NAME != "Queens University of Charlotte" &
+         NAME != "University of Mount Olive" &
+         NAME != "Sherrill's University of Barber & Cosmet" &
+         NAME != "Miami International University of Art &" &
+         str_detect(NAME,"University of") |
+         NAME %in% nc_pub_universities)
+
+pell_filtered$NAME[pell_filtered$NAME=="University of n c - Greensboro"] <- "University of North Carolina - Greensboro"
+pell_filtered$NAME[pell_filtered$NAME=="University of n c-Chapel Hill"] <- "University of North Carolina - Chapel Hill"
+pell_filtered$NAME[pell_filtered$NAME=="University of n c-Wilmington"] <- "University of North Carolina - Wilmington"
+pell_filtered$NAME[pell_filtered$NAME=="University of North Carolina at Asheville"] <- "University of North Carolina - Asheville"
+pell_filtered$NAME[pell_filtered$NAME=="University of North Carolina at Pembroke"] <- "University of North Carolina - Pembroke"
+pell_filtered$NAME[pell_filtered$NAME=="University of North Carolina Wilmington"] <- "University of North Carolina - Wilmington"
+pell_filtered$NAME[pell_filtered$NAME=="University of North Carolina at Wilmington (the)"] <- "University of North Carolina - Wilmington"
+pell_filtered$NAME[pell_filtered$NAME=="University of North Carolina - Chapel Hill-"] <- "University of North Carolina - Chapel Hill"
+pell_filtered$NAME[pell_filtered$NAME=="North Carolina A&t State Univ"] <- "North Carolina Agricultural and Technical State University"
+pell_filtered$NAME[pell_filtered$NAME=="North Carolina State Univ-Raleigh"] <- "North Carolina State University"
+pell_filtered$NAME[pell_filtered$NAME=="University of Nc at Asheville"] <- "University of North Carolina - Asheville"
+pell_filtered$NAME[pell_filtered$NAME=="University of Nc at Charlotte"] <- "University of North Carolina - Charlotte"
+pell_filtered$NAME[pell_filtered$NAME=="University of North Carolina School of the Arts"] <- "North Carolina School of the Arts"
+pell_filtered$NAME[pell_filtered$NAME=="Univ of North Carolina at Pembroke"] <- "University of North Carolina - Pembroke"
+
+pell_filtered <- pell_filtered %>%
+  mutate(NAME = gsub("University of North Carolina","UNC",NAME),
+         NAME = gsub("North Carolina","NC",NAME)) 
+
+
+# Looking at all the available data for the NC public universities
+
+pell_filtered %>%
+  group_by(NAME) %>%
+  count()
+
+```
+
+# Data exploration
+
+Alright now with all the wrangling done, lets vizualize how pell grant awards have changed over time. There are still a bunch of schools, so I am going to chunk it out into three groups: top, middle, and bottom pell grant earners in 2018 just to help with visualization. Of course a big issue is that some of the schools are really big (e.g. NC state with about 30k students) while others are small (UNC Asheville is about 3k students).
+
+```{r,fig.align='center'}
+
+
+
+quantile_2018 <- pell_filtered %>%
+    filter(YEAR == 2017)  %>%
+    mutate(quantile = ntile(AWARD,3)) %>%
+    select(quantile,NAME) %>%
+    distinct()
+
+quantiles <-pell_filtered %>%
+  left_join(quantile_2018,by="NAME") %>%
+  drop_na(quantile) %>%
+  mutate(avg_pell_grant = AWARD/RECIPIENT) %>%
+  group_split(quantile)
+
+
+
+p <- lapply(quantiles, function(d) ggplot(data = d,aes(x=YEAR,y=avg_pell_grant,color=NAME)) +
+  geom_point() +
+  geom_line() +
+  scale_y_continuous(labels=scales::dollar) +
+  scale_color_viridis_d() +
+  xlab("") + ylab("") +
+  ggpubr::theme_pubr(base_size=8) +
+  theme(legend.title=element_blank(),legend.position = "right"))
+
+wrap_plots(p,ncol=1)
+
+```
+ 
+
+
+What about overall -- how has the UNC system faired?
+
+```{r}
+
+pell_filtered %>%
+  mutate(avg_pell_grant = AWARD/RECIPIENT) %>%
+  ggplot(aes(x=YEAR,y=avg_pell_grant)) +
+  geom_line(aes(group=NAME),size=0.75,alpha=0.25) +
+  geom_smooth(se=FALSE,size=2,method="gam") +
+  ggpubr::theme_pubr() +
+  ylab("Average pell grant size")
+
+
+```
+
+Its interesting to see that huge bump around 2008 which corresponds with the great recession. 
+
+# Normalizing by uni size
+
+Okay, i really want to normalize this by how many students are enrolled. I went and downloaded enrollment data from the UNC website [here](https://myinsight.northcarolina.edu/t/Public/views/db_enroll/EnrollmentbyInstitution?%3Aembed=y&%3AisGuestRedirectFromVizportal=y&iid=1). Now im going to read in a relate the new data to the pell grant data.
+
+Im going to shorten the university names too
+
+```{r}
+enrollment <- read_csv("data/unc_enrollment.csv") %>%
+  select(1,2,6) %>%
+  mutate(SNAPSHOT_TERM = gsub("Fall ","",SNAPSHOT_TERM),
+         SNAPSHOT_TERM = as.integer(SNAPSHOT_TERM)) %>%
+  rename(year ="SNAPSHOT_TERM",
+         university = "Institution")
+
+pell_filtered2 %>% filter(str_detect(name,"Pembroke"))
+
+pell_filtered2 <- pell_filtered %>%
+  select(2:6,AWARD) %>%
+  mutate(university = case_when(
+    NAME == "Appalachian State University" ~ "ASU",
+    NAME == "East Carolina University" ~ "ECU",
+    NAME == "Elizabeth City State University" ~ "ECSU",
+    NAME == "Fayetteville State University" ~ "FSU",
+    NAME == "NC Agricultural and Technical State University" ~ "NCA&T",
+    NAME == "NC Central University" ~ "NCCU",   
+    NAME == "NC School of the Arts" ~ "UNCSA",
+    NAME == "NC State University" ~ "NC State",
+    NAME == "UNC - Chapel Hill" ~ "UNC-CH",
+    NAME == "UNC - Charlotte" ~ "UNCC",
+    NAME == "UNC - Greensboro" ~ "UNCG",
+    NAME == "UNC - Asheville" ~ "UNCA",  
+    NAME == "UNC - Pembroke" ~ "UNCP",
+    NAME == "UNC - Wilmington" ~ "UNCW",
+    NAME == "Western Carolina University" ~ "WCU",  
+    NAME == "Winston-Salem State University" ~ "WSSU"
+  )) %>%
+  #select(!NAME) %>%
+  janitor::clean_names() %>%
+  left_join(enrollment,by=c("university","year"))
+
+
+```
+
+```{r}
+pell_filtered2 %>%
+  filter(year >= 2012) %>%
+  janitor::clean_names() %>%
+  mutate(award_per_student = award/enrollment_measure_value) %>%
+  ggplot(aes(x=year,y=award_per_student)) +
+  geom_point(aes(group=university),size=0.75,alpha=0.25) +
+  geom_line(aes(group=university),size=0.75,alpha=0.25) +
+  geom_smooth(se=FALSE,size=2) +
+  ggpubr::theme_pubr() +
+  ylab("Pell Grant")
+```
+
+Interesting -- things seem to flatten out. Lets just tabulate the data and show the change
+
+```{r}
+pell_filtered2 %>%
+  filter(year >= 2012) %>%
+  janitor::clean_names() %>%
+  mutate(award_per_student = award/enrollment_measure_value) %>%
+  select(university,year,award_per_student) %>%
+  pivot_wider(names_from = year,values_from =award_per_student ) %>%
+  arrange(-`2017`) %>%
+  mutate(across(where(is.numeric), round, 0)) %>%
+  kbl() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+
+
+```
+
+
+
+
+

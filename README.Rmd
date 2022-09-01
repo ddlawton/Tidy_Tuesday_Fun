@@ -1,0 +1,6 @@
+---
+title: "README"
+output: github_document
+---
+
+This repo contains my data exploration of #TidyTuesdays datasets. I try to do everything in an rmarkdown with comments through out so that everyone can follow.
