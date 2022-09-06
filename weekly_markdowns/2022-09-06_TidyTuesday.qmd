@@ -1,0 +1,126 @@
+---
+title: "2022-09-05_TidyTuesday"
+author: "Douglas Lawton"
+format: html
+editor: visual
+editor_options: 
+  chunk_output_type: inline
+---
+
+## TidyTuesday: September 06, 2022
+### LEGO sets
+
+#### Load in libraries
+
+```{r}
+library(tidyverse)
+library(mgcv)
+library(DHARMa)
+library(gratia)
+library(patchwork)
+library(knitr)
+library(kableExtra)
+```
+
+#### Read in data
+
+```{r}
+inventories <- read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2022/2022-09-06/inventories.csv.gz')
+inventory_sets <- read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2022/2022-09-06/inventory_sets.csv.gz')
+sets <- read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2022/2022-09-06/sets.csv.gz')
+```
+
+#### Cleaning the data
+
+```{r}
+
+all_df <- left_join(inventories, inventory_sets, by = "set_num") |>
+  left_join(sets, by = "set_num") 
+
+ex_plot <- all_df |> 
+  ggplot(aes(x = num_parts)) +
+  geom_density() +
+  scale_x_log10()
+
+ex_plot
+```
+
+
+#### Lets explore how the LEGO sets have changed through the yeats.
+
+Perhaps set complexity increased with years?
+
+```{r}
+all_df %>%
+  group_by(year) %>%
+  summarize(mean_parts = mean(num_parts)) %>%
+  mutate(mean_parts=round(mean_parts,2)) %>%
+  arrange(-mean_parts) 
+  
+```
+
+Looks like there might be something to my idea? Lets graph it by boxplots to see
+
+```{r}
+
+plot <- all_df %>%
+  ggplot(aes(x=year,y=num_parts)) +
+    geom_point(size=0.25,alpha=0.3) +
+    geom_smooth(method="gam",se=F) +
+    geom_smooth(method="lm",se=F,color="red") +
+    scale_y_continuous(trans="log10")
+
+plot
+
+```
+
+What are these 1 piece sets?
+
+```{r}
+all_df %>% filter(num_parts == 1)
+```
+
+It appears to be special situations like the whole bioncle line up -- lets remove them to get a more telling story here. Im just going to give a coarse cut off -- there needs to be at least 20 pieces in the set.
+
+```{r}
+plot2 <- all_df %>%
+  filter(num_parts >= 100) %>%
+  ggplot(aes(x=year,y=num_parts)) +
+    geom_point(size=0.25,alpha=0.3) +
+    geom_smooth(method="gam",se=F) +
+    geom_smooth(method="lm",se=F,color="red") +
+    scale_y_continuous(trans="log10")
+
+plot2
+```
+
+seems to be a lot of variation still but theres some positice correlation. Maybe a nonlinear one! Lets go ahead and test for that.
+
+#### Building the GAM
+
+```{r}
+mod_data <- all_df %>%
+  filter(num_parts >= 100) %>%
+  mutate(version = factor(version),
+         num_parts_scaled = scale(num_parts)[,1])
+
+
+mod <- gam(num_parts_scaled~s(year,k=50,bs="tp") + s(version,bs="re"),select=TRUE,family = tw(link="log"),data=mod_data)
+```
+
+
+```{r}
+summary(mod)
+draw(mod)
+```
+
+```{r}
+
+all_df %>%
+  filter(num_parts >= 50) %>%
+  group_by(name) %>%
+  tally() %>%
+  arrange(-n)
+
+```
+
