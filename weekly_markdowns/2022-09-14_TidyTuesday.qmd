@@ -1,0 +1,134 @@
+---
+title: "2022-09-14_TidyTuesday"
+author: "Douglas Lawton"
+format: html
+editor: Source
+---
+
+## TidyTuesday: September 14, 2022
+
+### BIGFOOT sightins
+
+#### Load in libraries
+
+```{r}
+rm(list=ls())
+library(tidyverse)
+library(sf)
+library(rnaturalearth)
+
+library(elevatr)
+library(raster)
+library(rasterVis)
+```
+
+
+
+#### Load in data
+
+```{r}
+bigfoot <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2022/2022-09-13/bigfoot.csv')
+
+bigfoot2 <- bigfoot %>% select(2:5,7:11,13:23,25:28) 
+
+bigfoot2 %>% summary()
+
+```
+
+
+#### Spatial Distribution of sightings
+
+```{r}
+us <- rnaturalearth::ne_states(country="United States of America") %>% st_as_sf() %>%
+    select(name_en) %>% filter(name_en != "Alaska", name_en != "Hawaii'")
+
+bigfoot_sf <- bigfoot %>% left_join(us,by=c("state"="name_en")) %>% st_as_sf()
+
+```
+
+
+```{r}
+bigfoot_sf %>%
+    mutate(year = lubridate::year(date)) %>% summary()
+
+```
+
+How many were sighted in general by state?
+
+```{r}
+bigfoot_sf %>% group_by(state) %>% tally() %>% arrange(-n)
+```
+
+Lets make the map!
+
+```{r}
+
+state_count <- bigfoot_sf %>%
+    st_as_sf() %>%
+    group_by(state) %>%
+    summarize(n=n())
+
+
+state_count %>%
+    ggplot(aes(x=n)) +
+      geom_histogram() +
+      ggpubr::theme_pubr()
+
+  
+  
+map <- state_count %>%
+    ggplot() +
+      geom_sf(aes(fill = n)) +
+      scale_x_continuous(limits=c(-125,-65)) +
+      viridis::scale_fill_viridis(trans="log1p") +
+      theme_void() +
+      ggtitle("Bigfoot sightings",subtitle="Between 1868 to 2021")
+
+map
+```
+
+#### Where in Washington are all these sightings happening?
+
+
+```{r}
+WA <- rnaturalearth::ne_states(country="United States of America") %>% st_as_sf() %>%
+    select(postal) %>% filter(postal == "WA")
+
+elevation <- get_elev_raster(WA, z = 9)
+
+
+## crop and mask
+elevation2 <- crop(elevation, extent(WA))
+elevation3 <- mask(elevation2, WA)
+
+
+elevation_spdf <- as(elevation3, "SpatialPixelsDataFrame")
+elevation_df <- as.data.frame(elevation_spdf)
+
+bigtfoot2_points <- bigfoot2 %>% select(5:7,state) %>% 
+  drop_na(latitude) %>% 
+  filter(state=="Washington") %>%
+  filter(latitude>45,longitude>-160) %>%
+  st_as_sf(coords=c("longitude","latitude"),crs=4326)
+)
+
+wa_map <- WA %>% ggplot() + 
+  geom_raster(data = elevation_df, 
+            aes(x = x, y = y, fill = filef085262f593c)) +
+  geom_sf(data=bigtfoot2_points,size=0.75,color="white") +
+  geom_sf(color="black",fill=NA) +
+  viridis::scale_fill_viridis(option="A") +
+  theme_void() +
+  theme(legend.title=element_blank(),legend.position = "left",
+        plot.background = element_rect(fill = "white", colour = NA))
+
+asp <- tmaptools::get_asp_ratio(WA) 
+
+height <- 5
+ggsave("output/wa_map.png", width = height * asp, height = height,dpi=600)
+
+```
+
+
+
+bigfoot <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2022/2022-09-13/bigfoot.csv')
